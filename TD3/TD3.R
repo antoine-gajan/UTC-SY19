@@ -1,0 +1,119 @@
+# 1. Participation au marché du travail
+
+install.packages("Ecdat")
+library(Ecdat)
+
+Participation <- Participation
+#Participation$lfp <- ifelse(Participation$lfp=="yes",1,0)
+#Participation$foreign <- ifelse(Participation$foreign=="yes",1,0)
+
+reg_log <- glm(lfp ~ ., family = binomial, data = Participation)
+summary(reg_log)
+
+# 2. Analyse des données spam
+
+spam <- read.table("spambase.dat", header = FALSE)
+n <- nrow(spam)
+p <- ncol(spam) - 1
+napp <- round(2*n - 3)
+ntst <- n - napp
+names(spam)[58] <- "Y"
+spam$Y <- as.factor(spam$Y)
+
+train <- sample(1:n, round(2*n/3))
+spam.train <- spam[train, ]
+spam.test <- spam[-train, ]
+
+reg_log<- glm(Y ~., family = binomial, data = spam.train)
+pred_proba <- predict(reg_log, spam.test, type = "response")
+reg_log.pred <- ifelse(pred_proba > 0.5, 1, 0)
+taux_erreur <- sum(reg_log.pred != spam.test$Y) / nrow(spam.test)
+confusion_matrix <- table(Predicted = reg_log.pred, Actual = spam.test$Y)
+
+library(MASS)
+lda<- lda(Y ~., data = spam.train)
+pred_proba <- predict(lda, spam.test)
+lda.pred <- ifelse(pred_proba$posterior[, 2] > 0.5, 1, 0)
+taux_erreur <- sum(lda.pred != spam.test$Y) / nrow(spam.test)
+confusion_matrix <- table(Predicted = lda.pred, Actual = spam.test$Y)
+
+
+confusion_mcnemar <- table(pred1 = reg_log.pred == spam.test$Y, pred2 = lda.pred == spam.test$Y)
+print(confusion_mcnemar)
+mcnemar_test <- mcnemar.test(confusion_mcnemar)
+print(mcnemar_test) # p-value : 2.058e-08 < 0.05 donc différence significative
+
+install.packages("pROC")
+library(pROC)
+
+reg_log.roc_curve <- roc(spam.test$Y, reg_log.pred)
+lda.roc_curve <- roc(spam.test$Y, lda.pred)
+
+plot(reg_log.roc_curve); plot(lda.roc_curve)
+
+# 3. Estimation de la probabilité d'erreur de Bayes
+install.packages(mvtnorm)
+library(mvtnorm)
+
+mu1 <- c(0,0)
+mu2 <- c(0,2)
+mu3 <- c(2,0)
+p1<-0.3
+p2<-0.3
+p3<-1-p1-p2
+Sigma <- matrix(c(1, 0.5, 0.5, 2), 2, 2)
+
+gen.data <- function(n,mu1,mu2,mu3,Sigma1,Sigma2,Sigma3,p1,p2){
+  y<-sample(3,n,prob=c(p1,p2,1-p1-p2),replace=TRUE)
+  X<-matrix(0,n,2)
+  N1<-length(which(y==1)) # number of objects from class 1
+  N2<-length(which(y==2))
+  N3<-length(which(y==3))
+  X[y==1,]<-rmvnorm(N1,mu1,Sigma1)
+  X[y==2,]<-rmvnorm(N2,mu2,Sigma2)
+  X[y==3,]<-rmvnorm(N3,mu3,Sigma3)
+  return(list(X=X,y=y))
+}
+
+test<-gen.data(n=10000,mu1,mu2,mu3,Sigma,Sigma,Sigma,
+               p1=p1,p2=p2)
+plot(test$X,col=test$y,pch=".")
+
+g<-cbind(p1*dmvnorm(test$X,mu1,Sigma),
+         p2*dmvnorm(test$X,mu2,Sigma),
+         p3*dmvnorm(test$X,mu3,Sigma))
+ypred<-max.col(g)
+
+table(test$y, ypred)
+
+errb<-mean(test$y != ypred)
+print(errb)
+
+N<- 100 # Number of replications
+err.lda<-rep(0,N)
+err.qda<-rep(0,N)
+
+n<-50 # Training set size
+
+for(i in 1:100){ 
+  #print(i)
+  # training set generation
+  train<-gen.data(n=n,mu1,mu2,mu3,Sigma,Sigma,Sigma,
+                  p1=p1,p2=p2)
+  train.frame<-data.frame(train)
+  test.frame<-data.frame(test)
+  
+  # LDA
+  fit.lda<- lda(y~.,data=train.frame)
+  pred.lda<-predict(fit.lda,newdata=test.frame)
+  err.lda[i]<-mean(test$y != pred.lda$class)
+  
+  # QDA
+  fit.qda<- qda(y~.,data=train.frame)
+  pred.qda<-predict(fit.qda,newdata=test.frame)
+  err.qda[i]<-mean(test$y != pred.qda$class)
+}
+
+boxplot(cbind(err.lda,err.qda),ylim=range(errb,err.lda,err.qda),ylab="Erreur de test",
+        names=c("LDA","QDA"))
+abline(h=errb,col="red")

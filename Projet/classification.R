@@ -18,8 +18,9 @@ library(MLmetrics)
 # Chargement du jeu de données
 setwd("C:/Users/antoi/Desktop/UTC/GI05/SY19/Projet")
 data <- read.csv("a24_clas_app.txt", sep = " ")
+data$y <- factor(data$y)
 
-set.seed(20241010)
+set.seed(20241108)
 # Caractéristiques générales du jeu de données
 n = nrow(data)
 p = ncol(data) - 1
@@ -50,9 +51,17 @@ boxplot(data$X1, data$X2, data$X3,
 
 plot(data$X2 ~ data$X1, main = "Valeurs de X2 en fonction de X1")
 
-barplot(data$X1, main = "Diagramme en barre des valeurs de X1")
-
 barplot(table(data$y), main = "Distribution des valeurs de y", xlab = "y", ylab = "Nombre", col = "lightblue", border = "black")
+
+resultat <- shapiro.test(data$X21)
+ks.result <- ks.test(data$X8, "punif", min = 0, max = 10)
+
+
+
+par(mfrow=c(1, 3))
+hist(data$X1, main = "Variable X1", xlab = "X1")
+hist(data$X21, main = "Variable X21", xlab = "X21")
+barplot(table(data$X47), main = "Variable X46", xlab = "X46")
 
 
 # KNN : Fonction pour trouver le meilleur nombre de voisins k
@@ -193,30 +202,19 @@ plotcp(tree_model)
 
 # Random Forest
 
-x.train <- data.train_scaled[, -1]  # Caractéristiques d'entraînement sans la colonne cible
-y.train <- as.factor(data.train_scaled$y)      # Variable cible d'entraînement
-x.test <- data.test_scaled[, -1]    # Caractéristiques de test sans la colonne cible
-y.test <- as.factor(data.test_scaled$y)        # Variable cible de test
+data <- read.csv("a24_clas_app.txt", sep = " ")
+data$y <- factor(data$y)
 
-y.train <- as.factor(y.train)
-y.test <- as.factor(y.test)
-
-rf_model <- randomForest(x = x.train, y = y.train, 
-                         xtest = x.test, ytest = y.test,
+rf_model <- randomForest(x = data[, -which(names(data) == "y")], y = as.factor(data$y), 
                          ntree = 500, 
-                         mtry = floor(sqrt(ncol(x.train))),
+                         mtry = floor(sqrt(ncol(data))),
                          nodesize = 1,
                          importance = TRUE, 
                          keep.forest = TRUE)
 
-print(rf_model)
-rf.confusion_matrix <- table(Predicted = rf_model$test$predicted, Actual = y.test)
-print(rf.confusion_matrix)
+importance_scores <- importance(rf_model, type = 1)  # type = 1 gives Mean Decrease in Accuracy
 
-rf.accuracy.test <- sum(rf_model$test$predicted == y.test) / length(y.test)
-print(rf.accuracy.test) #0.58
 
-# Importance des variables
 
 varImpPlot(rf_model)
 
@@ -463,3 +461,308 @@ components.gmm <- 0
 # Apprentissage de chaque modèle avec le nombre optimal de composantes ACP
 best_components_list <- c(8, 15, 25, 35, 14, 18, 22, 10, 0, 0)
 summary_metric_models(data, "accuracy", best_components_list)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+library(farff)
+library(dplyr)
+library(corrplot)
+library(glmnet)
+library(mgcv)
+library(caret)
+library(leaps)
+library(gam)
+library(mclust)
+library(Matrix)
+library(corrplot)
+library(e1071) 
+library(caTools) 
+library(class) 
+library(nnet)
+library(MASS)
+library(stats)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(MLmetrics)
+library(neuralnet)
+library(smotefamily)
+
+
+setwd("C:/Users/antoi/Desktop/UTC/GI05/SY19/Projet")
+data <- read.csv("a24_clas_app.txt", sep = " ")
+data <- data[data$y != 1, ]
+data$y <- factor(data$y)
+
+levels(data$y) <- make.names(levels(data$y))
+
+#onehot_vars <- c("X46", "X47", "X48", "X49", "X50")
+#scale_vars <- setdiff(names(data), c("y", onehot_vars))
+
+# Preprocess the data
+#data <- preprocess_data(data, onehot_vars, scale_vars)
+smote <- SMOTE(X = data[, -which(names(data) == "y")], target = data$y, K = 5, dup_size = 2)
+data <- data.frame(smote$data)
+
+clas.formula_significant <- as.formula("class ~ X20 + X21 + X22 +X23 + X24 + X25 + X26 + X27 + X28 + X29 +
+        X30 + X31 + X32 + X33 + X34 + X35 + X36 + X37 + X38 + X39 + X40 + X41 + X42 + X43 + X44 + X45 + X46 + X47 + X48 + X49 + X50")
+
+
+# Test du meilleur modèle avec caret
+
+train_control <- trainControl(
+  method = "cv",
+  number = 10,
+  classProbs = TRUE,
+)
+
+# Initialiser une liste pour les résultats de chaque modèle
+results <- list()
+
+# 1. Régression Logistique
+grid <- expand.grid(
+  decay = c(0, 0.01, 0.1, 1)  # Regularization parameter
+)
+model_multinom <- train(
+  clas.formula_significant, data = data, method = "multinom",
+  trControl = train_control, tuneGrid = grid
+)
+results[["Logistic Regression Multinomial"]] <- model_multinom
+
+# 2. Analyse Discriminante Linéaire (LDA)
+model_lda <- train(
+  clas.formula_significant, data = data, method = "lda",
+  trControl = train_control
+)
+results[["LDA"]] <- model_lda
+
+# 3. QDA
+model_qda <- train(
+  clas.formula_significant, data = data, method = "qda",
+  trControl = train_control
+)
+results[["QDA"]] <- model_qda
+
+# 4. Random Forest
+grid <- expand.grid(
+  mtry = seq(1, 20, by = 1)  # Adjust based on the number of predictors in your data
+)
+model_rf <- train(
+  clas.formula_significant, data = data, method = "rf",
+  trControl = train_control, ntree = 100, tuneGrid = grid
+)
+results[["Random Forest"]] <- model_rf
+
+# 5. Arbre de Décision avec élagage (CART)
+grid_rpart <- expand.grid(cp = seq(0, 0.1, 0.01))
+model_rpart <- train(
+  clas.formula_significant, data = data, method = "rpart",
+  trControl = train_control, tuneGrid = grid_rpart
+)
+results[["Decision Tree (Pruned)"]] <- model_rpart
+
+# 6. Modèles de Mélange Gaussien (GMM)
+
+folds <- createFolds(data$y, k = 10, list = TRUE)
+accuracies <- c()
+
+for (i in seq_along(folds)) {
+  # Split the data
+  train_indices <- setdiff(seq_len(nrow(data)), folds[[i]])
+  train_data <- data[train_indices, ]
+  test_data <- data[folds[[i]], ]
+
+  # Train the model
+  model <- MclustDA(train_data[, -which(names(data) == "y")], class = train_data$y)
+
+  # Make predictions
+  predictions <- predict(model, test_data[, -which(names(test_data) == "y")])$classification
+
+  # Calculate accuracy
+  accuracy <- mean(predictions == test_data$y)
+  accuracies <- c(accuracies, accuracy)
+}
+
+# Report cross-validation results
+cat("Mean accuracy:", mean(accuracies), "\n")
+cat("Accuracy for each fold:", accuracies, "\n")
+
+# 7. Naive Bayes
+model_naive_bayes <- train(
+  clas.formula_significant, data = data, method = "naive_bayes",
+  trControl = train_control
+)
+results[["Naive Bayes"]] <- model_naive_bayes
+
+
+# 8. SVM Radial
+grid <- expand.grid(
+  C = c(0.01, 0.1, 1, 10, 100),
+  sigma = c(0.01, 0.01, 0.1, 1)
+)
+
+model_svm_radial <- train(
+  clas.formula_significant,
+  data = data,
+  method = "svmRadial",
+  tuneGrid = grid
+)
+
+results[["SVM radial"]] <- model_svm_radial
+
+
+# 9. K-Nearest Neighbors (KNN)
+grid <- expand.grid(
+  k = seq(1, 50, by = 2)
+)
+
+model_knn <- train(
+  clas.formula_significant, data = data, method = "knn", tuneGrid = grid
+)
+results[["KNN"]] <- model_knn
+
+# 10. SVM Linear
+grid <- expand.grid(
+  C = c(0.001, 0.01, 0.1, 1, 10, 100)
+)
+model_svm_linear <- train(
+  clas.formula_significant,
+  data = data,
+  method = "svmLinear"
+)
+
+results[["SVM linear"]] <- model_svm_linear
+
+
+for (model_name in names(results)) {
+  cat("Meilleure précision pour", model_name, ":\n")
+
+  # Get the best accuracy metric
+  best_metric <- max(results[[model_name]]$results$Accuracy, na.rm = TRUE)
+
+  # Print the best accuracy
+  cat("Précision :", round(best_metric, 4), "\n")
+  cat("-------------------\n")
+}
+
+library(kernlab)
+library(nnet)         # Pour `multinom`
+library(MASS)         # Pour `qda`
+library(randomForest) # Pour `randomForest`
+
+set.seed(123)
+
+clas.formula_significant_multinom <- as.formula("y ~ X1 + X4 + X6 + X13 + X15 + X17 + X19 + X22 + X23 + X25 + X29 +
+                                            X31 + X33 + X35 + X37 + X39 + X41 + X43 + X45 + X46 + 
+                                            X47 + X48 + X49 + X50")
+
+clas.formula_significant_svm <- as.formula("y ~ X50 + X49 + X47 + X48 + X46 + X41 + X23 + X43 + X35 + X22 + X25 + X26 + X31")
+
+clas.formula_significant_qda <- as.formula("y ~ X20 + X21 + X22 +X23 + X24 + X25 + X26 + X27 + X28 + X29 +
+        X30 + X31 + X32 + X33 + X34 + X35 + X36 + X37 + X38 + X39 + X40 + X41 + X42 + X43 + X44 + X45")
+
+clas.formula_significant_lda <- as.formula("y ~ X20 + X21 + X22 +X23 + X24 + X25 + X26 + X27 + X28 + X29 +
+        X30 + X31 + X32 + X33 + X34 + X35 + X36 + X37 + X38 + X39 + X40 + X41 + X42 + X43 + X44 + X45")
+
+clas.formula_significant_nb <- as.formula("y ~ X20 + X21 + X22 +X23 + X24 + X25 + X26 + X27 + X28 + X29 +
+        X30 + X31 + X32 + X33 + X34 + X35 + X36 + X37 + X38 + X39 + X40 + X41 + X42 + X43 + X44 + X45")
+
+clas.formula_significant_rf <- as.formula("y ~ X6 + X12 + X13 + X15 + X19 + X22 + X24 + X25 + X26 + X27 + X28 + X29 +
+                                            X31 + X32 + X33 + X35 + X36 + X37 + X39 + X41 + X43 + X44 + X46 + 
+                                            X47 + X48 + X49 + X50")
+
+
+# Créer de nouvelles partitions pour la validation croisée interne
+
+inner_fold <- sample(1:K, nrow(data), replace = TRUE)  # `n` doit être défini (nombre d'observations)
+inner_accuracy <- numeric(K)
+pred_cum <- data.frame()
+
+for (j in 1:K) {
+  # Diviser les données selon les folds internes
+  train <- data[inner_fold != j, ]
+  test <- data[inner_fold == j, ]
+  
+  # Ajuster les modèles
+  model_multinom <- glm(clas.formula_significant_multinom, data = train, family = "binomial")
+  pred1 <- predict(model_multinom, newdata = test)  # Prédictions pour `multinom`
+  
+  model_qda <- qda(clas.formula_significant_qda, data = train)
+  pred2 <- predict(model_qda, newdata = test)$class  # Prédictions pour `qda`
+  
+  model_rf <- randomForest(clas.formula_significant_rf, data = train)
+  pred3 <- predict(model_rf, newdata = test)  # Prédictions pour `randomForest`
+
+  model_nb <- naiveBayes(clas.formula_significant_nb, data = train)
+  pred4 <- predict(model_nb, newdata = test)  # Prédictions pour `randomForest`
+  
+  model_svm <- svm(clas.formula_significant_svm, data = train, kernel = "radial", type = "C-classification")
+  pred5 <- predict(model_svm, newdata = test)
+  
+  # Appliquer une règle de majorité
+  predictions <- data.frame(pred1, pred2, pred3, pred4, pred5)
+  majority_vote <- apply(predictions, 1, function(x) {
+    names(which.max(table(x)))  # Trouver la classe majoritaire
+  })
+  predictions$y <- test$y
+  pred_cum <- rbind(pred_cum, predictions)
+  
+  # Calcul de l'accuracy pour le fold interne
+  inner_accuracy[j] <- mean(majority_vote == test$y)
+}
+
+# Stocker la moyenne des précisions internes
+cv_accuracy <- mean(inner_accuracy)
+
+# Afficher les précisions validées par cross-validation
+print(cv_accuracy)
+
+
+
+
+# Générer toutes les combinaisons possibles de modèles
+model_combinations <- unlist(lapply(1:(ncol(pred_cum) - 1), function(k) {  # Exclure la colonne cible 'y'
+  combn(names(pred_cum)[-ncol(pred_cum)], k, simplify = FALSE)
+}), recursive = FALSE)
+
+# Évaluer chaque combinaison
+combination_results <- sapply(model_combinations, function(models) {
+  # Appliquer la majorité sur les modèles sélectionnés
+  majority_vote <- apply(pred_cum[models], 1, function(x) {
+    names(which.max(table(x)))  # Classe majoritaire
+  })
+  
+  # Calculer l'accuracy globale pour cette combinaison
+  mean(majority_vote == pred_cum$y)
+})
+
+# Identifier les meilleures combinaisons
+max_accuracy <- max(combination_results)
+best_combinations <- model_combinations[which(combination_results == max_accuracy)]
+
+# Afficher les meilleures combinaisons et leur précision
+list(
+  best_combinations = best_combinations,
+  max_accuracy = max_accuracy
+)
